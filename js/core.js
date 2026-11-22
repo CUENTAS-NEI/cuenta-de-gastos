@@ -1,5 +1,8 @@
-/* Mis Cuentas — lógica pura: filtros, saldos, agregados e informes.
-   Sin acceso al DOM, para poder probarla aparte. Todo el cálculo se hace en céntimos. */
+/* Mis Cuentas — lógica pura: filtros, agregados e informes.
+   Sin acceso al DOM, para poder probarla aparte. Todo el cálculo se hace en céntimos.
+   Los saldos ya no se calculan: los anota el usuario al cerrar cada mes
+   (saldos = { 'YYYY-MM': céntimos al terminar ese mes }). El saldo al empezar un mes
+   es el que se anotó al terminar el anterior. */
 (function (g) {
   'use strict';
 
@@ -17,7 +20,7 @@
   function eur(n) {
     let x = Math.round(Number(n) * 100) / 100;
     if (!x || Math.abs(x) < 0.005) x = 0;
-    return NF.format(x).replace(/[  ]/g, ' ');
+    return NF.format(x).replace(/[  ]/g, ' ');
   }
   const eurC = c => eur(c / 100);
 
@@ -59,29 +62,19 @@
     return movs.map((m, i) => [m, i]).sort((a, b) => a[0].fecha < b[0].fecha ? -1 : a[0].fecha > b[0].fecha ? 1 : a[1] - b[1]).map(x => x[0]);
   }
 
-  /* ---------- saldos (siempre de la cuenta completa) ---------- */
-  function saldoAntes(movs, cfg, iso) {
-    let c = cents(cfg.saldo_inicial);
-    for (const m of movs) if (m.fecha >= cfg.fecha_saldo_inicial && m.fecha < iso) c += signed(m);
-    return c;
-  }
-  function saldoTotal(movs, cfg) {
-    let c = cents(cfg.saldo_inicial);
-    for (const m of movs) if (m.fecha >= cfg.fecha_saldo_inicial) c += signed(m);
-    return c;
-  }
-  function mesSiguiente(y, m) { return m === 12 ? `${y + 1}-01-01` : `${y}-${pad2(m + 1)}-01`; }
-
-  /** [inicio, finExclusivo|null] del periodo, o null si el periodo no es continuo (un mes de todos los años) */
-  function limites(F, cfg) {
-    if (F.anio === 'all') return F.mes === 'all' ? [cfg.fecha_saldo_inicial, null] : null;
-    if (F.mes === 'all') return [`${F.anio}-01-01`, `${F.anio + 1}-01-01`];
-    return [`${F.anio}-${pad2(F.mes)}-01`, mesSiguiente(F.anio, F.mes)];
-  }
-  function saldosPeriodo(movs, cfg, F) {
-    const l = limites(F, cfg);
-    if (!l) return { ini: null, fin: null };
-    return { ini: saldoAntes(movs, cfg, l[0]), fin: l[1] ? saldoAntes(movs, cfg, l[1]) : saldoTotal(movs, cfg) };
+  /* ---------- saldos anotados a mano ---------- */
+  const ymDe = (y, m) => `${y}-${pad2(m)}`;
+  function ymAnterior(ym) { let [y, m] = ym.split('-').map(Number); m--; if (!m) { m = 12; y--; } return ymDe(y, m); }
+  const val = (saldos, ym) => (saldos && Number.isFinite(saldos[ym])) ? saldos[ym] : null;
+  /** saldo anotado al terminar el mes (céntimos) o null */
+  const saldoFin = (saldos, ym) => val(saldos, ym);
+  /** saldo al empezar el mes = el anotado al terminar el anterior */
+  const saldoIni = (saldos, ym) => val(saldos, ymAnterior(ym));
+  /** sugerencia para el cierre: saldo al empezar + ingresos − gastos anotados en el mes (toda la cuenta) */
+  function saldoSugerido(movs, saldos, ym) {
+    const ini = saldoIni(saldos, ym);
+    if (ini === null) return null;
+    return movs.reduce((c, m) => m.fecha.slice(0, 7) === ym ? c + signed(m) : c, ini);
   }
 
   function totales(lista) {
@@ -90,9 +83,8 @@
     return { ing, gas, res: ing - gas, n: lista.length };
   }
 
-  function kpis(movs, cfg, F) {
-    const t = totales(filtrar(movs, F));
-    return Object.assign(t, saldosPeriodo(movs, cfg, F), { filtrado: hayFiltroDeContenido(F) });
+  function kpis(movs, F) {
+    return Object.assign(totales(filtrar(movs, F)), { filtrado: hayFiltroDeContenido(F) });
   }
 
   /* ---------- agregados ---------- */
@@ -113,7 +105,7 @@
     const out = [];
     let [y, mo] = ms[0].split('-').map(Number);
     const fin = ms[ms.length - 1];
-    for (;;) { const k = `${y}-${pad2(mo)}`; out.push(k); if (k >= fin) break; mo++; if (mo > 12) { mo = 1; y++; } }
+    for (;;) { const k = ymDe(y, mo); out.push(k); if (k >= fin) break; mo++; if (mo > 12) { mo = 1; y++; } }
     return out;
   }
   function etiquetaMes(ym, conAnio) {
@@ -121,13 +113,12 @@
     return conAnio ? `${cap(MES_C[m - 1])} ${String(y).slice(2)}` : cap(MESES[m - 1]);
   }
 
-  /** evolución mensual: ingresos/gastos según filtros (salvo el mes) y saldo de la cuenta */
-  function serieMensual(movs, cfg, F) {
+  /** evolución mensual: ingresos/gastos según filtros (salvo el mes) y los saldos anotados */
+  function serieMensual(movs, F, saldos) {
     return mesesRango(movs, F.anio).map(ym => {
       const [y, m] = ym.split('-').map(Number);
       const t = totales(movs.filter(x => x.fecha.slice(0, 7) === ym && pasa(x, F, true)));
-      return { ym, y, m, ing: t.ing, gas: t.gas, res: t.res,
-        ini: saldoAntes(movs, cfg, `${ym}-01`), fin: saldoAntes(movs, cfg, mesSiguiente(y, m)) };
+      return { ym, y, m, ing: t.ing, gas: t.gas, res: t.res, ini: saldoIni(saldos, ym), fin: saldoFin(saldos, ym) };
     });
   }
 
@@ -155,13 +146,15 @@
      sec = { titulo, tono: 'gasto'|'ingreso'|'neutro', cols: [{h, w, num}], sinCabecera, zeroDash, filas: [{c: [celda], k: 'total'}] }
      celda = texto | {n: euros, f: 'eur'|'pct'} | null                                                    */
   const E = c => ({ n: c / 100, f: 'eur' });
+  const EoNull = c => c === null ? null : E(c);
+  const EoTexto = c => c === null ? 'Sin anotar' : E(c);
   const P = x => ({ n: x, f: 'pct' });
 
   const INFORMES = [
     { id: 'secretario', nombre: 'Para el Secretario', desc: 'Total de gastos e ingresos por categoría, como la parte derecha de cada pestaña.', necesita: 'periodo' },
-    { id: 'mensual', nombre: 'Mensual completo', desc: 'Saldos del mes, resumen por categoría y todos los movimientos.', necesita: 'mes' },
-    { id: 'anual', nombre: 'Anual', desc: 'Total del año por categoría, con porcentajes y saldos.', necesita: 'anio' },
-    { id: 'meses', nombre: 'Por meses', desc: 'Saldo inicial, ingresos, gastos, resultado y saldo final de cada mes.', necesita: 'anio' },
+    { id: 'mensual', nombre: 'Mensual completo', desc: 'Saldos que anotas, resumen por categoría y todos los movimientos.', necesita: 'mes' },
+    { id: 'anual', nombre: 'Anual', desc: 'Total del año por categoría, con porcentajes.', necesita: 'anio' },
+    { id: 'meses', nombre: 'Por meses', desc: 'Ingresos, gastos y resultado de cada mes, con los saldos que hayas anotado.', necesita: 'anio' },
     { id: 'catmeses', nombre: 'Categorías por meses', desc: 'Cada categoría mes a mes, como la pestaña Resumen anual.', necesita: 'anio' },
     { id: 'detalle', nombre: 'Movimientos', desc: 'La lista de movimientos que ves con los filtros actuales.', necesita: 'periodo' }
   ];
@@ -209,20 +202,20 @@
     return { titulo: 'RESULTADO', tono: 'neutro', cols: [{ h: '', w: 3 }, { h: 'Importe', w: 1.3, num: true }], sinCabecera: true,
       filas: [{ c: ['Ingresos', E(t.ing)] }, { c: ['Gastos', E(t.gas)] }, { c: ['Ingresos − gastos', E(t.res)], k: 'total' }] };
   }
-  function notaFiltros(F, cats) {
+  function notaFiltros(F) {
     if (!hayFiltroDeContenido(F)) return [];
     const partes = [];
     if (F.tipo !== 'all') partes.push(F.tipo === 'gasto' ? 'solo gastos' : 'solo ingresos');
     if (F.cats.length) partes.push('categorías: ' + F.cats.map(k => k.split('|')[1]).join(', '));
-    return ['Filtrado (' + partes.join('; ') + '). Los saldos son siempre los de la cuenta completa.'];
+    return ['Filtrado (' + partes.join('; ') + ').'];
   }
 
   function docMensual(ctx) {
-    const { cfg, cats, movs } = ctx;
+    const { cfg, cats, movs, saldos } = ctx;
     const per = periodoEfectivo(ctx.F, movs, 'mes');
     const F = Object.assign({}, ctx.F, per);
+    const ym = ymDe(F.anio, F.mes);
     const lista = ordenar(filtrar(movs, F));
-    const s = saldosPeriodo(movs, cfg, F);
     const secs = seccionesResumen(lista, cats, F, false);
     secs.push(seccionResultado(totales(lista)));
     for (const [tipo, titulo, tono, h] of [['gasto', 'DETALLE DE GASTOS', 'gasto', 'Coste'], ['ingreso', 'DETALLE DE INGRESOS', 'ingreso', 'Ingreso']]) {
@@ -235,42 +228,48 @@
     return {
       id: 'mensual', titulo: 'Informe mensual',
       meta: [['Nombre', cfg.nombre || ''], ['Año', String(F.anio)], ['Mes', cap(MESES[F.mes - 1])],
-        ['Saldo inicio mes', E(s.ini)], ['Saldo fin de mes', E(s.fin)]],
-      secciones: secs, notas: notaFiltros(F, cats), orient: 'p', hoja: 'Mensual',
+        ['Saldo inicio mes', EoTexto(saldoIni(saldos, ym))], ['Saldo fin de mes', EoTexto(saldoFin(saldos, ym))]],
+      secciones: secs, notas: notaFiltros(F), orient: 'p', hoja: 'Mensual',
       archivo: `Informe_mensual_${slugPeriodo(F.anio, F.mes)}`, vacio: !lista.length
     };
   }
 
   function docAnual(ctx) {
-    const { cfg, cats, movs } = ctx;
+    const { cfg, cats, movs, saldos } = ctx;
     const F = Object.assign({}, ctx.F, periodoEfectivo(ctx.F, movs, 'anio'));
     const lista = filtrar(movs, F);
-    const s = saldosPeriodo(movs, cfg, F);
     const secs = seccionesResumen(lista, cats, F, true);
     secs.push(seccionResultado(totales(lista)));
+    const meta = [['Nombre', cfg.nombre || ''], ['Año', String(F.anio)]];
+    const ini = saldoFin(saldos, ymDe(F.anio - 1, 12)), fin = saldoFin(saldos, ymDe(F.anio, 12));
+    if (ini !== null) meta.push(['Saldo inicio año', E(ini)]);
+    if (fin !== null) meta.push(['Saldo fin de año', E(fin)]);
     return {
-      id: 'anual', titulo: 'Informe anual',
-      meta: [['Nombre', cfg.nombre || ''], ['Año', String(F.anio)], ['Saldo inicio año', E(s.ini)], ['Saldo fin de año', E(s.fin)]],
-      secciones: secs, notas: notaFiltros(F, cats), orient: 'p', hoja: 'Anual', archivo: `Informe_anual_${F.anio}`, vacio: !lista.length
+      id: 'anual', titulo: 'Informe anual', meta,
+      secciones: secs, notas: notaFiltros(F), orient: 'p', hoja: 'Anual', archivo: `Informe_anual_${F.anio}`, vacio: !lista.length
     };
   }
 
   function docMeses(ctx) {
-    const { cfg, cats, movs } = ctx;
+    const { cfg, movs, saldos } = ctx;
     const F = Object.assign({}, ctx.F, periodoEfectivo(ctx.F, movs, 'anio'));
-    const serie = serieMensual(movs, cfg, F);
+    const serie = serieMensual(movs, F, saldos);
     const t = serie.reduce((a, x) => ({ ing: a.ing + x.ing, gas: a.gas + x.gas }), { ing: 0, gas: 0 });
+    const conSaldos = serie.some(x => x.ini !== null || x.fin !== null);
+    const cols = [{ h: 'Mes', w: 1.4 }]
+      .concat(conSaldos ? [{ h: 'Saldo inicial', w: 1.2, num: true }] : [],
+        [{ h: 'Ingresos', w: 1.2, num: true }, { h: 'Gastos', w: 1.2, num: true }, { h: 'Resultado', w: 1.2, num: true }],
+        conSaldos ? [{ h: 'Saldo final', w: 1.2, num: true }] : []);
+    const fila = (et, ini, ing, gas, res, fin) => [et].concat(conSaldos ? [ini] : [], [ing, gas, res], conSaldos ? [fin] : []);
     return {
       id: 'meses', titulo: 'Informe por meses',
       meta: [['Nombre', cfg.nombre || ''], ['Año', String(F.anio)]],
       secciones: [{
-        titulo: 'EVOLUCIÓN MENSUAL', tono: 'neutro',
-        cols: [{ h: 'Mes', w: 1.4 }, { h: 'Saldo inicial', w: 1.2, num: true }, { h: 'Ingresos', w: 1.2, num: true },
-          { h: 'Gastos', w: 1.2, num: true }, { h: 'Resultado', w: 1.2, num: true }, { h: 'Saldo final', w: 1.2, num: true }],
-        filas: serie.map(x => ({ c: [etiquetaMes(x.ym, false), E(x.ini), E(x.ing), E(x.gas), E(x.res), E(x.fin)] }))
-          .concat([{ c: ['TOTAL', null, E(t.ing), E(t.gas), E(t.ing - t.gas), null], k: 'total' }])
+        titulo: 'EVOLUCIÓN MENSUAL', tono: 'neutro', cols,
+        filas: serie.map(x => ({ c: fila(etiquetaMes(x.ym, false), EoNull(x.ini), E(x.ing), E(x.gas), E(x.res), EoNull(x.fin)) }))
+          .concat([{ c: fila('TOTAL', null, E(t.ing), E(t.gas), E(t.ing - t.gas), null), k: 'total' }])
       }],
-      notas: notaFiltros(F, cats), orient: 'p', hoja: 'Por meses', archivo: `Informe_por_meses_${F.anio}`, vacio: !serie.length
+      notas: notaFiltros(F), orient: 'p', hoja: 'Por meses', archivo: `Informe_por_meses_${F.anio}`, vacio: !serie.length
     };
   }
 
@@ -295,19 +294,19 @@
     }
     if (totMes.gasto && totMes.ingreso) {
       const d = meses.map((_, i) => totMes.ingreso[i] - totMes.gasto[i]);
-      secs.push({ titulo: 'SALDO DEL MES (INGRESOS − GASTOS)', tono: 'neutro', cols, sinCabecera: true, zeroDash: true,
-        filas: [{ c: ['SALDO'].concat(d.map(E), [E(d.reduce((a, b) => a + b, 0))]), k: 'total' }] });
+      secs.push({ titulo: 'RESULTADO DEL MES (INGRESOS − GASTOS)', tono: 'neutro', cols, sinCabecera: true, zeroDash: true,
+        filas: [{ c: ['RESULTADO'].concat(d.map(E), [E(d.reduce((a, b) => a + b, 0))]), k: 'total' }] });
     }
     return {
       id: 'catmeses', titulo: 'Categorías por meses',
       meta: [['Nombre', cfg.nombre || ''], ['Año', String(F.anio)]],
-      secciones: secs, notas: notaFiltros(F, cats), orient: meses.length > 4 ? 'l' : 'p', hoja: 'Categorías por meses',
+      secciones: secs, notas: notaFiltros(F), orient: meses.length > 4 ? 'l' : 'p', hoja: 'Categorías por meses',
       archivo: `Categorias_por_meses_${F.anio}`, vacio: !meses.length
     };
   }
 
   function docDetalle(ctx) {
-    const { cfg, cats, movs, F } = ctx;
+    const { cfg, movs, F } = ctx;
     const lista = ordenar(filtrar(movs, F));
     const t = totales(lista);
     return {
@@ -319,7 +318,7 @@
         filas: lista.map(m => ({ c: [fmtFecha(m), m.categoria, m.concepto, m.tipo === 'ingreso' ? E(cents(m.importe)) : null, m.tipo === 'gasto' ? E(cents(m.importe)) : null] }))
           .concat([{ c: ['TOTAL', '', '', E(t.ing), E(t.gas)], k: 'total' }, { c: ['Ingresos − gastos', '', '', E(t.res), null], k: 'total' }])
       }],
-      notas: notaFiltros(F, cats), orient: 'p', hoja: 'Movimientos', archivo: `Movimientos_${slugPeriodo(F.anio, F.mes)}`, vacio: !lista.length
+      notas: notaFiltros(F), orient: 'p', hoja: 'Movimientos', archivo: `Movimientos_${slugPeriodo(F.anio, F.mes)}`, vacio: !lista.length
     };
   }
 
@@ -338,7 +337,8 @@
   g.Core = {
     MESES, MES_C, cap, pad2, cents, eur, eurC, fmtFecha, etiquetaPeriodo, slugPeriodo,
     FILTRO_VACIO, claveCat, pasa, filtrar, hayFiltroDeContenido, ordenar,
-    saldoAntes, saldoTotal, saldosPeriodo, totales, kpis, catsDe, porCategoria, mesesRango, etiquetaMes,
+    ymDe, ymAnterior, saldoIni, saldoFin, saldoSugerido,
+    totales, kpis, catsDe, porCategoria, mesesRango, etiquetaMes,
     serieMensual, aniosConDatos, periodoEfectivo, periodoDeInforme, INFORMES, construirInforme, textoCelda
   };
 })(typeof window !== 'undefined' ? window : globalThis);

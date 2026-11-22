@@ -76,67 +76,63 @@
   <div id="app" hidden>
     <header class="barra">
       <h1 class="marca">Mis cuentas</h1>
-      <span id="estado" class="estado" aria-live="polite"></span>
+      <nav class="pestanas" aria-label="Secciones">
+        <button type="button" data-v="resumen" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Resumen</span></button>
+        <button type="button" data-v="movs"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span>Movimientos</span></button>
+        <button type="button" data-v="informes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 13h8M8 17h5"/></svg><span>Informes</span></button>
+        <button type="button" data-v="ajustes"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>Ajustes</span></button>
+      </nav>
+      <span id="estado" class="sr" aria-live="polite"></span>
       <button id="btnRecargar" class="icono" type="button" aria-label="Actualizar datos" title="Actualizar datos">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
     </header>
 
     <main>
-      <!-- Saldo actual: lo primero que se ve al entrar -->
-      <section class="saldo" id="saldoHoy" aria-label="Saldo actual">
-        <span class="saldo-et">Saldo a día de hoy</span>
-        <span class="saldo-num num" id="saldoNum">—</span>
-        <span class="saldo-sub" id="saldoSub"></span>
-      </section>
-
-      <!-- Filtros compartidos por Resumen, Movimientos e Informes -->
-      <div class="filtros" id="filtros" role="group" aria-label="Filtros">
-        <label class="f"><span class="sr">Año</span><select id="fAnio"></select></label>
-        <label class="f"><span class="sr">Mes</span><select id="fMes"></select></label>
-        <label class="f"><span class="sr">Tipo</span>
-          <select id="fTipo"><option value="all">Gastos e ingresos</option><option value="gasto">Solo gastos</option><option value="ingreso">Solo ingresos</option></select>
-        </label>
-        <button type="button" class="f fbtn" id="fCats" aria-haspopup="dialog">Todas las categorías</button>
-        <button type="button" class="limpiar" id="fLimpiar" hidden>Quitar filtros</button>
+      <!-- Periodo: compartido por Resumen y Movimientos -->
+      <div class="periodo" id="periodo">
+        <button type="button" class="icono" id="pAnt" aria-label="Periodo anterior"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button type="button" class="p-texto" id="pTexto" aria-haspopup="dialog"><span id="pEt">—</span><svg viewBox="0 0 10 6" width="11" height="7" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+        <button type="button" class="icono" id="pSig" aria-label="Periodo siguiente"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       </div>
 
       <!-- RESUMEN -->
       <section class="vista" id="v-resumen" aria-labelledby="t-resumen">
         <h2 class="sr" id="t-resumen">Resumen</h2>
+        <div class="hero">
+          <span class="hero-et" id="hEt">Gastado</span>
+          <span class="hero-num num" id="hNum">—</span>
+          <span class="hero-comp" id="hComp"></span>
+        </div>
         <dl class="kpis" id="kpis"></dl>
-        <p class="nota" id="kpiNota" hidden></p>
 
         <div class="graficos">
           <figure class="graf">
-            <figcaption><h3>Ingresos y gastos por mes</h3>
+            <figcaption><h3>Gastos por categoría</h3><span class="leyenda">Toca una para ver sus movimientos</span></figcaption>
+            <div id="gCatGas" class="cat-toque"></div>
+          </figure>
+          <figure class="graf">
+            <figcaption><h3>Ingresos por categoría</h3></figcaption>
+            <div id="gCatIng" class="cat-toque"></div>
+          </figure>
+          <figure class="graf ancho">
+            <figcaption><h3 id="tGMeses">Mes a mes</h3>
               <span class="leyenda"><i style="background:var(--c-ingreso)"></i>Ingresos <i style="background:var(--c-gasto)"></i>Gastos</span>
             </figcaption>
             <div class="lienzo" id="gMeses"></div>
             <details><summary>Ver datos</summary><div id="tMeses"></div></details>
-          </figure>
-          <figure class="graf">
-            <figcaption><h3>Saldo a final de mes</h3></figcaption>
-            <div class="lienzo" id="gSaldo"></div>
-            <details><summary>Ver datos</summary><div id="tSaldo"></div></details>
-          </figure>
-          <figure class="graf">
-            <figcaption><h3>Gastos por categoría</h3><span class="leyenda" id="gGasTot"></span></figcaption>
-            <div id="gCatGas"></div>
-          </figure>
-          <figure class="graf">
-            <figcaption><h3>Ingresos por categoría</h3><span class="leyenda" id="gIngTot"></span></figcaption>
-            <div id="gCatIng"></div>
           </figure>
         </div>
       </section>
 
       <!-- MOVIMIENTOS -->
       <section class="vista" id="v-movs" hidden aria-labelledby="t-movs">
-        <div class="cab-vista">
-          <h2 id="t-movs">Movimientos</h2>
-          <input type="search" id="buscar" placeholder="Buscar concepto…" aria-label="Buscar por concepto">
+        <h2 class="sr" id="t-movs">Movimientos</h2>
+        <div class="buscador">
+          <input type="search" id="buscar" placeholder="Buscar…" aria-label="Buscar">
+          <button type="button" class="btn" id="btnFiltrar" aria-haspopup="dialog">Filtrar<span class="badge" id="fBadge" hidden></span></button>
         </div>
+        <div class="chips" id="chips" hidden></div>
         <ol class="lista" id="lista"></ol>
         <button type="button" class="btn" id="masMovs" hidden>Mostrar más</button>
       </section>
@@ -144,24 +140,52 @@
       <!-- INFORMES -->
       <section class="vista" id="v-informes" hidden aria-labelledby="t-inf">
         <h2 id="t-inf">Informes</h2>
-        <fieldset class="tipos" id="tiposInforme"><legend class="sr">Tipo de informe</legend></fieldset>
-        <div class="inf-acciones">
-          <p class="inf-periodo" id="infPeriodo"></p>
-          <div class="botones">
-            <button type="button" class="btn primario" id="btnPdf">Descargar PDF</button>
-            <button type="button" class="btn" id="btnXlsx">Descargar Excel</button>
-            <button type="button" class="btn" id="btnCompartir" hidden>Compartir PDF</button>
+
+        <section class="tarjeta" aria-labelledby="tCierre">
+          <div class="tarjeta-cab">
+            <h3 id="tCierre">Cierre de mes</h3>
+            <div class="paso">
+              <button type="button" class="icono" id="cAnt" aria-label="Mes anterior"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+              <span id="cMes">—</span>
+              <button type="button" class="icono" id="cSig" aria-label="Mes siguiente"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            </div>
           </div>
-          <button type="button" class="enlace" id="btnTodoXlsx">Excel con todos los informes del periodo (una pestaña por informe)</button>
-        </div>
-        <div class="previa" id="previa" aria-label="Vista previa del informe"></div>
+          <div class="saldos-campos">
+            <label>Saldo al empezar
+              <span class="importe-peq"><input id="sIni" inputmode="decimal" autocomplete="off" placeholder="Sin anotar"><span aria-hidden="true">€</span></span>
+              <small id="sIniAyuda"></small>
+            </label>
+            <label>Saldo al terminar
+              <span class="importe-peq"><input id="sFin" inputmode="decimal" autocomplete="off" placeholder="Sin anotar"><span aria-hidden="true">€</span></span>
+              <small id="sFinAyuda"></small>
+            </label>
+          </div>
+          <p class="sugerido" id="sSugerido" hidden></p>
+          <p class="error" id="sError" role="alert"></p>
+          <button type="button" class="btn primario grande" id="btnSecretario">Descargar PDF para el Secretario</button>
+          <p class="vacio" id="cVacio" hidden>No hay movimientos este mes.</p>
+          <div class="inf-lista" id="infMes"></div>
+        </section>
+
+        <section class="tarjeta" aria-labelledby="tAnio">
+          <div class="tarjeta-cab">
+            <h3 id="tAnio">Informes del año</h3>
+            <div class="paso">
+              <button type="button" class="icono" id="aAnt" aria-label="Año anterior"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+              <span id="aAnio">—</span>
+              <button type="button" class="icono" id="aSig" aria-label="Año siguiente"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            </div>
+          </div>
+          <div class="inf-lista" id="infAnio"></div>
+          <button type="button" class="enlace" id="btnTodoXlsx">Excel con todos los informes del año (una pestaña por informe)</button>
+        </section>
       </section>
 
       <!-- AJUSTES -->
       <section class="vista" id="v-ajustes" hidden aria-labelledby="t-aj">
         <h2 id="t-aj">Ajustes</h2>
         <dl class="ajustes" id="ajustesDatos"></dl>
-        <p class="nota">El nombre y el saldo de partida se cambian en la pestaña <b>Config</b> de tu hoja; las categorías, en la pestaña <b>Categorías</b>. Después pulsa actualizar.</p>
+        <p class="nota">El nombre se cambia en la pestaña <b>Config</b> de tu hoja; las categorías, en la pestaña <b>Categorías</b>. Después pulsa actualizar. Los saldos de cada mes los anotas en <b>Informes → Cierre de mes</b>.</p>
 
         <div class="instalar tarjeta" data-instalar hidden></div>
 
@@ -176,13 +200,6 @@
     </main>
 
     <button type="button" class="fab" id="fab"><span aria-hidden="true">+</span> Anotar</button>
-
-    <nav class="pestanas" aria-label="Secciones">
-      <button type="button" data-v="resumen" aria-current="page">Resumen</button>
-      <button type="button" data-v="movs">Movimientos</button>
-      <button type="button" data-v="informes">Informes</button>
-      <button type="button" data-v="ajustes">Ajustes</button>
-    </nav>
   </div>
 
   <!-- Hoja: anotar / editar movimiento -->
@@ -209,14 +226,49 @@
     </form>
   </div>
 
-  <!-- Hoja: elegir categorías -->
-  <div class="hoja-fondo" id="hojaCats" hidden>
-    <div class="hoja" role="dialog" aria-modal="true" aria-labelledby="tCats">
-      <div class="hoja-cab"><h2 id="tCats">Categorías</h2><button type="button" class="icono" data-cerrar aria-label="Cerrar">✕</button></div>
+  <!-- Hoja: elegir periodo -->
+  <div class="hoja-fondo" id="hojaPeriodo" hidden>
+    <div class="hoja" role="dialog" aria-modal="true" aria-labelledby="tPer">
+      <div class="hoja-cab"><h2 id="tPer">Periodo</h2><button type="button" class="icono" data-cerrar aria-label="Cerrar">✕</button></div>
+      <div class="paso grande">
+        <button type="button" class="icono" id="hpAnt" aria-label="Año anterior"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <span id="hpAnio">—</span>
+        <button type="button" class="icono" id="hpSig" aria-label="Año siguiente"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </div>
+      <div class="mesgrid" id="hpMeses"></div>
+      <div class="hoja-pie dos">
+        <button type="button" class="btn" id="hpTodoAnio">Todo el año</button>
+        <button type="button" class="btn" id="hpTodo">Desde el principio</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hoja: filtrar movimientos -->
+  <div class="hoja-fondo" id="hojaFiltro" hidden>
+    <div class="hoja" role="dialog" aria-modal="true" aria-labelledby="tFil">
+      <div class="hoja-cab"><h2 id="tFil">Filtrar movimientos</h2><button type="button" class="icono" data-cerrar aria-label="Cerrar">✕</button></div>
+      <div class="seg tres" role="radiogroup" aria-label="Tipo">
+        <label><input type="radio" name="ftipo" value="all" checked><span>Todos</span></label>
+        <label><input type="radio" name="ftipo" value="gasto"><span>Gastos</span></label>
+        <label><input type="radio" name="ftipo" value="ingreso"><span>Ingresos</span></label>
+      </div>
       <div id="listaCats" class="cats"></div>
       <div class="hoja-pie">
-        <button type="button" class="btn" id="catsNinguna">Todas</button>
-        <button type="button" class="btn primario" data-cerrar>Aplicar</button>
+        <button type="button" class="btn" id="fQuitar">Quitar filtros</button>
+        <button type="button" class="btn primario" data-cerrar id="fVer">Ver movimientos</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hoja: vista previa de un informe -->
+  <div class="hoja-fondo" id="hojaInf" hidden>
+    <div class="hoja ancha" role="dialog" aria-modal="true" aria-labelledby="tInf">
+      <div class="hoja-cab"><h2 id="tInf">Informe</h2><button type="button" class="icono" data-cerrar aria-label="Cerrar">✕</button></div>
+      <div class="previa" id="previa" aria-label="Vista previa del informe"></div>
+      <div class="hoja-pie">
+        <button type="button" class="btn" id="btnXlsx">Excel</button>
+        <button type="button" class="btn" id="btnCompartir" hidden>Compartir</button>
+        <button type="button" class="btn primario" id="btnPdf">Descargar PDF</button>
       </div>
     </div>
   </div>

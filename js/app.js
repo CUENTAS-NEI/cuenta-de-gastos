@@ -6,7 +6,7 @@
   const $$ = s => [...document.querySelectorAll(s)];
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-  const LS = { cx: 'mc.conexion', datos: 'mc.datos', filtros: 'mc.filtros', ultCat: 'mc.ultimaCategoria' };
+  const LS = { cx: 'mc.conexion', datos: 'mc.datos', filtros: 'mc.filtros', ultCat: 'mc.ultimaCategoria', saldos: 'mc.saldos' };
   const leer = k => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
   const guardar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* almacenamiento lleno o bloqueado */ } };
   const borrarLS = k => { try { localStorage.removeItem(k); } catch (e) { } };
@@ -23,9 +23,11 @@
     acceso: null,           // contenido de acceso.json (cifrado)
     accesoNuevo: null,      // acceso.json recién creado, pendiente de subir
     data: null,             // {cfg, cats, movs}
+    saldos: {},             // { 'YYYY-MM': céntimos al terminar el mes } — los anota el usuario
     sync: null,             // fecha de la última sincronización
     F: Object.assign({}, Core.FILTRO_VACIO),
-    vista: 'resumen', informe: 'secretario', limite: 150, editando: null
+    vista: 'resumen', limite: 150, editando: null,
+    inf: null, infSel: null, pAnio: null   // periodo de Informes, informe abierto, año de la hoja de periodo
   };
 
   /* ---------------- API ---------------- */
@@ -74,6 +76,7 @@
     enlazar();
     pintarInstalar(); Acceso.alCambiarInstalar(pintarInstalar);
     const f = leer(LS.filtros); if (f) S.F = Object.assign({}, Core.FILTRO_VACIO, f);
+    S.saldos = leer(LS.saldos) || {};
 
     S.cx = leer(LS.cx); S.recordar = !!S.cx;
     if (!S.cx) S.cx = SS.leer(LS.cx);
@@ -111,6 +114,7 @@
   }
 
   function cerrarSesion() {
+    // los saldos anotados se conservan: solo viven en este dispositivo
     [LS.cx, LS.datos, LS.ultCat].forEach(borrarLS); SS.borrar(LS.cx);
     S.cx = null; S.data = null; S.sync = null;
     cerrarHojas();
@@ -204,12 +208,23 @@
     $$('[data-instalar]').forEach(el => { el.innerHTML = html; el.hidden = !html; });
   }
 
-  /* ---------------- filtros ---------------- */
+  /* ---------------- periodo y filtros ----------------
+     S.F.anio / S.F.mes: periodo (Resumen y Movimientos). S.F.tipo / S.F.cats: solo filtran Movimientos. */
+  const hoyYm = () => { const d = new Date(); return Core.ymDe(d.getFullYear(), d.getMonth() + 1); };
+  const mesesConDatos = () => [...new Set(S.data.movs.map(m => m.fecha.slice(0, 7)))].sort();
+  const modo = F => F.anio === 'all' ? 'todo' : F.mes === 'all' ? 'anio' : 'mes';
+  const Fper = () => ({ anio: S.F.anio, mes: S.F.mes, tipo: 'all', cats: [] });
+  const nombreMesLargo = ym => Core.cap(Core.MESES[+ym.slice(5) - 1]) + ' ' + ym.slice(0, 4);
+  const nombreMes = ym => Core.MESES[+ym.slice(5) - 1];
+  function primerAnio() { const a = Core.aniosConDatos(S.data.movs); return a.length ? a[0] : new Date().getFullYear(); }
+
   function ajustarFiltros() {
-    if (!leer(LS.filtros)) { // primera vez: el año más reciente con datos
-      const a = Core.aniosConDatos(S.data.movs);
-      S.F.anio = a.length ? a[a.length - 1] : 'all';
+    if (!leer(LS.filtros) || S.F.version !== 2) { // primera vez (o filtros de la versión anterior): el último mes con datos
+      const ms = mesesConDatos(), ym = ms.length ? ms[ms.length - 1] : hoyYm();
+      Object.assign(S.F, { anio: +ym.slice(0, 4), mes: +ym.slice(5), version: 2 });
+      guardar(LS.filtros, S.F);
     }
+    if (S.F.anio === 'all') S.F.mes = 'all';
     const validas = new Set(S.data.cats.map(c => Core.claveCat(c.tipo, c.nombre)));
     S.F.cats = S.F.cats.filter(k => validas.has(k));
   }
@@ -220,99 +235,138 @@
     guardar(LS.filtros, S.F);
     render();
   }
-  function pintarFiltros() {
-    const anios = Core.aniosConDatos(S.data.movs);
-    const hoy = new Date().getFullYear();
-    if (anios.indexOf(hoy) < 0) anios.push(hoy);
-    if (S.F.anio !== 'all' && anios.indexOf(S.F.anio) < 0) anios.push(S.F.anio);
-    anios.sort((a, b) => b - a);
-    $('#fAnio').innerHTML = '<option value="all">Todos los años</option>' + anios.map(a => `<option value="${a}">${a}</option>`).join('');
-    $('#fAnio').value = String(S.F.anio);
-    $('#fMes').innerHTML = '<option value="all">Todo el año</option>' + Core.MESES.map((m, i) => `<option value="${i + 1}">${Core.cap(m)}</option>`).join('');
-    $('#fMes').value = String(S.F.mes);
-    $('#fTipo').value = S.F.tipo;
-    const n = S.F.cats.length;
-    $('#fCats').textContent = n === 0 ? 'Todas las categorías' : n === 1 ? S.F.cats[0].split('|')[1] : n + ' categorías';
-    $('#fCats').classList.toggle('activo', n > 0);
-    const hayFiltros = S.F.mes !== 'all' || Core.hayFiltroDeContenido(S.F);
-    $('#fLimpiar').hidden = !hayFiltros;
-    $('#filtros').hidden = S.vista === 'ajustes';
+  function moverPeriodo(d) {
+    const m = modo(S.F);
+    if (m === 'mes') { let y = S.F.anio, mo = S.F.mes + d; if (mo < 1) { mo = 12; y--; } if (mo > 12) { mo = 1; y++; } setFiltro({ anio: y, mes: mo }); }
+    else if (m === 'anio') setFiltro({ anio: S.F.anio + d });
+  }
+  function pintarPeriodo() {
+    const m = modo(S.F);
+    $('#periodo').hidden = !(S.vista === 'resumen' || S.vista === 'movs');
+    $('#pEt').textContent = m === 'todo' ? 'Desde el principio' : m === 'anio' ? 'Año ' + S.F.anio : nombreMesLargo(Core.ymDe(S.F.anio, S.F.mes));
+    $('#pAnt').style.visibility = $('#pSig').style.visibility = m === 'todo' ? 'hidden' : '';
+    const hoy = hoyYm();
+    $('#pSig').disabled = m === 'mes' ? Core.ymDe(S.F.anio, S.F.mes) >= hoy : m === 'anio' && S.F.anio >= +hoy.slice(0, 4);
+    $('#pAnt').disabled = m === 'mes' ? S.F.anio < primerAnio() || (S.F.anio === primerAnio() && S.F.mes === 1) : m === 'anio' && S.F.anio <= primerAnio();
+  }
+
+  // hoja de periodo: año arriba y los 12 meses
+  function abrirPeriodo() { S.pAnio = S.F.anio === 'all' ? new Date().getFullYear() : S.F.anio; pintarHojaPeriodo(); abrirHoja('#hojaPeriodo'); }
+  function pintarHojaPeriodo() {
+    const con = new Set(mesesConDatos()), hoy = hoyYm(), m = modo(S.F);
+    $('#hpAnio').textContent = S.pAnio;
+    $('#hpAnt').disabled = S.pAnio <= primerAnio();
+    $('#hpSig').disabled = S.pAnio >= +hoy.slice(0, 4);
+    $('#hpMeses').innerHTML = Core.MES_C.map((c, i) => {
+      const ym = Core.ymDe(S.pAnio, i + 1);
+      const on = m === 'mes' && S.F.anio === S.pAnio && S.F.mes === i + 1;
+      return `<button type="button" data-mes="${i + 1}" class="${on ? 'on' : ''} ${con.has(ym) ? '' : 'sin'}"${ym > hoy ? ' disabled' : ''}${on ? ' aria-pressed="true"' : ''}>${Core.cap(c)}</button>`;
+    }).join('');
+    $('#hpTodoAnio').textContent = 'Todo ' + S.pAnio;
+    $('#hpTodoAnio').classList.toggle('on', m === 'anio' && S.F.anio === S.pAnio);
+    $('#hpTodo').classList.toggle('on', m === 'todo');
+  }
+
+  // hoja de filtros de Movimientos
+  function abrirFiltro() { pintarHojaFiltro(); abrirHoja('#hojaFiltro'); }
+  function pintarHojaFiltro() {
+    $(`#hojaFiltro input[name="ftipo"][value="${S.F.tipo}"]`).checked = true;
+    const grupos = [['gasto', 'Gastos'], ['ingreso', 'Ingresos']].filter(([t]) => S.F.tipo === 'all' || S.F.tipo === t);
+    $('#listaCats').innerHTML = grupos.map(([t, et]) => `<fieldset><legend>${grupos.length > 1 ? et : 'Categorías'}</legend>` +
+      Core.catsDe(S.data.cats, t).map(n => { const k = Core.claveCat(t, n); return `<label class="chk"><input type="checkbox" value="${esc(k)}"${S.F.cats.indexOf(k) >= 0 ? ' checked' : ''}><span>${esc(n)}</span></label>`; }).join('') +
+      '</fieldset>').join('');
+    const n = Core.filtrar(S.data.movs, S.F).length;
+    $('#fVer').textContent = n === 1 ? 'Ver 1 movimiento' : `Ver ${n} movimientos`;
+  }
+  function pintarChips() {
+    const chips = [];
+    if (S.F.tipo !== 'all') chips.push(`<button type="button" class="chip" data-quitar="tipo">${S.F.tipo === 'gasto' ? 'Solo gastos' : 'Solo ingresos'}<span aria-hidden="true">×</span></button>`);
+    S.F.cats.forEach(k => chips.push(`<button type="button" class="chip" data-quitar="${esc(k)}">${esc(k.split('|')[1])}<span aria-hidden="true">×</span></button>`));
+    $('#chips').innerHTML = chips.join('') + (chips.length > 1 ? '<button type="button" class="enlace" data-quitar="todo">Quitar todos</button>' : '');
+    $('#chips').hidden = !chips.length;
+    const n = (S.F.tipo !== 'all' ? 1 : 0) + S.F.cats.length;
+    $('#fBadge').textContent = n; $('#fBadge').hidden = !n;
+    $('#btnFiltrar').classList.toggle('activo', n > 0);
   }
 
   /* ---------------- render ---------------- */
   function render() {
     if (!S.data) return;
-    pintarFiltros();
-    pintarSaldo();
+    pintarPeriodo();
+    $('#fab').hidden = !(S.vista === 'resumen' || S.vista === 'movs');
     if (S.vista === 'resumen') pintarResumen();
     if (S.vista === 'movs') pintarLista();
     if (S.vista === 'informes') pintarInformes();
     if (S.vista === 'ajustes') pintarAjustes();
   }
 
-  function manana() { const d = new Date(); d.setDate(d.getDate() + 1); return `${d.getFullYear()}-${Core.pad2(d.getMonth() + 1)}-${Core.pad2(d.getDate())}`; }
-
-  function pintarSaldo() {
-    const { cfg, movs } = S.data;
-    const c = Core.saldoAntes(movs, cfg, manana());
-    const el = $('#saldoNum');
-    el.textContent = Core.eurC(c);
-    el.classList.toggle('neg', c < 0);
-    const [y, m, d] = cfg.fecha_saldo_inicial.split('-');
-    $('#saldoSub').textContent = `Partiendo de ${Core.eur(cfg.saldo_inicial)} el ${d}/${m}/${y}`;
-  }
-
   function pintarResumen() {
-    const { cfg, cats, movs } = S.data;
-    const F = S.F;
-    const k = Core.kpis(movs, cfg, F);
-    const item = (et, c, cls) => `<div class="${cls || ''}"><dt>${et}</dt><dd class="num">${c === null ? '—' : Core.eurC(c)}</dd></div>`;
-    $('#kpis').innerHTML =
-      (k.ini !== null ? item('Saldo al empezar', k.ini) : '') +
-      item('Ingresos', k.ing, 'ing') + item('Gastos', k.gas, 'gas') +
-      item('Ingresos − gastos', k.res, k.res < 0 ? 'res neg' : 'res') +
-      (k.fin !== null ? item('Saldo al terminar', k.fin, 'fin') : '');
-    $('#kpiNota').hidden = !k.filtrado;
-    $('#kpiNota').textContent = 'Ingresos y gastos según los filtros. Los saldos son siempre los de la cuenta completa.';
+    const { cats, movs } = S.data;
+    const F = Fper(), m = modo(F);
+    const t = Core.totales(Core.filtrar(movs, F));
 
-    // evolución mensual (ignora el filtro de mes para dar contexto)
-    const serie = Core.serieMensual(movs, cfg, F);
-    const variosAnios = new Set(serie.map(x => x.y)).size > 1;
-    const dat = serie.map(x => ({ ym: x.ym, et: Core.etiquetaMes(x.ym, variosAnios).slice(0, variosAnios ? 6 : 3), ing: x.ing / 100, gas: x.gas / 100, res: x.res / 100, v: x.fin / 100 }));
-    const nombreMes = ym => Core.cap(Core.MESES[+ym.slice(5) - 1]) + ' ' + ym.slice(0, 4);
-    const vacio = '<p class="vacio">No hay movimientos en este periodo.</p>';
-    $('#gMeses').innerHTML = dat.length ? '' : vacio;
-    $('#gSaldo').innerHTML = dat.length ? '' : vacio;
-    Charts.columnas($('#gMeses'), dat, {
-      aria: 'Ingresos y gastos por mes',
-      html: d => `<b>${nombreMes(d.ym)}</b><span><i style="background:var(--c-ingreso)"></i>Ingresos ${Core.eur(d.ing)}</span><span><i style="background:var(--c-gasto)"></i>Gastos ${Core.eur(d.gas)}</span><span>Resultado ${Core.eur(d.res)}</span>`
-    });
-    Charts.linea($('#gSaldo'), dat, {
-      aria: 'Saldo a final de cada mes', fmt: v => Core.eur(v),
-      html: d => `<b>${nombreMes(d.ym)}</b><span>Saldo final ${Core.eur(d.v)}</span>`
-    });
-    const tabla = (cab, filas) => `<table class="tabla"><thead><tr>${cab.map((h, i) => `<th${i ? ' class="num"' : ''}>${h}</th>`).join('')}</tr></thead><tbody>${filas.map(f => `<tr>${f.map((c, i) => `<td${i ? ' class="num"' : ''}>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
-    $('#tMeses').innerHTML = tabla(['Mes', 'Ingresos', 'Gastos', 'Resultado'], dat.map(d => [nombreMes(d.ym), Core.eur(d.ing), Core.eur(d.gas), Core.eur(d.res)]));
-    $('#tSaldo').innerHTML = tabla(['Mes', 'Saldo final'], dat.map(d => [nombreMes(d.ym), Core.eur(d.v)]));
+    // cifra protagonista: lo gastado en el periodo, con contexto
+    const ym = m === 'mes' ? Core.ymDe(F.anio, F.mes) : null;
+    $('#hEt').textContent = m === 'mes' ? `Gastado en ${nombreMes(ym)}` : m === 'anio' ? `Gastado en ${F.anio}` : 'Gastado en total';
+    $('#hNum').textContent = Core.eurC(t.gas);
+    let comp = '';
+    if (m === 'mes') {
+      const ant = Core.ymAnterior(ym), [ya, ma] = ant.split('-').map(Number);
+      const gAnt = Core.totales(Core.filtrar(movs, { anio: ya, mes: ma, tipo: 'all', cats: [] })).gas;
+      if (ym === hoyYm()) comp = gAnt ? `Mes en curso · en ${nombreMes(ant)}, ${Core.eurC(gAnt)}` : 'Mes en curso';
+      else if (gAnt && t.gas) {
+        const p = Math.round((t.gas - gAnt) / gAnt * 100);
+        comp = p === 0 ? `Lo mismo que en ${nombreMes(ant)}` : `<b class="${p > 0 ? 'sube' : 'baja'}">${p > 0 ? '▲' : '▼'} ${Math.abs(p)} %</b> ${p > 0 ? 'más' : 'menos'} que en ${nombreMes(ant)} (${Core.eurC(gAnt)})`;
+      }
+    } else {
+      const n = Core.mesesRango(movs, F.anio).length;
+      if (n > 1) comp = `Media de ${Core.eurC(Math.round(t.gas / n))} al mes`;
+    }
+    $('#hComp').innerHTML = comp; $('#hComp').hidden = !comp;
 
-    // por categoría (respeta todos los filtros)
+    const item = (et, c, cls) => `<div class="${cls || ''}"><dt>${et}</dt><dd class="num">${Core.eurC(c)}</dd></div>`;
+    $('#kpis').innerHTML = item('Ingresos', t.ing, 'ing') + item('Ingresos − gastos', t.res, t.res < 0 ? 'neg' : 'pos');
+
+    // por categoría: se puede tocar para ver los movimientos
     const lista = Core.filtrar(movs, F);
-    for (const [tipo, id, tot, color] of [['gasto', '#gCatGas', '#gGasTot', '--c-gasto'], ['ingreso', '#gCatIng', '#gIngTot', '--c-ingreso']]) {
+    for (const [tipo, id, color] of [['gasto', '#gCatGas', '--c-gasto'], ['ingreso', '#gCatIng', '--c-ingreso']]) {
       const filas = Core.porCategoria(lista, cats, tipo, false).sort((a, b) => b.c - a.c).map(r => ({ nombre: r.nombre, v: r.c / 100 }));
       const total = filas.reduce((s, r) => s + r.v, 0);
-      $(id).closest('figure').hidden = F.tipo !== 'all' && F.tipo !== tipo;
-      $(tot).textContent = total ? 'Total ' + Core.eur(total) : '';
       Charts.barras($(id), filas, { color, total, fmt: v => Core.eur(v), vacio: tipo === 'gasto' ? 'Sin gastos en este periodo.' : 'Sin ingresos en este periodo.' });
+      $$(id + ' li').forEach((li, i) => {
+        li.dataset.cat = Core.claveCat(tipo, filas[i].nombre); li.tabIndex = 0; li.setAttribute('role', 'button');
+        li.setAttribute('aria-label', `${filas[i].nombre}, ${Core.eur(filas[i].v)}. Ver movimientos`);
+      });
     }
+
+    // mes a mes del año (o de todo, si el periodo es «desde el principio»)
+    const serie = Core.serieMensual(movs, { anio: F.anio, mes: 'all', tipo: 'all', cats: [] }, S.saldos);
+    const variosAnios = new Set(serie.map(x => x.y)).size > 1;
+    $('#tGMeses').textContent = F.anio === 'all' ? 'Mes a mes' : `Mes a mes en ${F.anio}`;
+    const dat = serie.map(x => ({ ym: x.ym, et: Core.etiquetaMes(x.ym, variosAnios).slice(0, variosAnios ? 6 : 3), ing: x.ing / 100, gas: x.gas / 100, res: x.res / 100 }));
+    $('#gMeses').innerHTML = dat.length ? '' : '<p class="vacio">No hay movimientos en este periodo.</p>';
+    Charts.columnas($('#gMeses'), dat, {
+      aria: 'Ingresos y gastos por mes',
+      html: d => `<b>${nombreMesLargo(d.ym)}</b><span><i style="background:var(--c-ingreso)"></i>Ingresos ${Core.eur(d.ing)}</span><span><i style="background:var(--c-gasto)"></i>Gastos ${Core.eur(d.gas)}</span><span>Resultado ${Core.eur(d.res)}</span>`
+    });
+    const tabla = (cab, filas) => `<table class="tabla"><thead><tr>${cab.map((h, i) => `<th${i ? ' class="num"' : ''}>${h}</th>`).join('')}</tr></thead><tbody>${filas.map(f => `<tr>${f.map((c, i) => `<td${i ? ' class="num"' : ''}>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    $('#tMeses').innerHTML = tabla(['Mes', 'Ingresos', 'Gastos', 'Resultado'], dat.map(d => [nombreMesLargo(d.ym), Core.eur(d.ing), Core.eur(d.gas), Core.eur(d.res)]));
+  }
+  function verCategoria(k) {
+    S.F.tipo = 'all'; S.F.cats = [k]; S.limite = 150; guardar(LS.filtros, S.F);
+    $('#buscar').value = '';
+    irA('movs');
   }
 
   function pintarLista() {
+    pintarChips();
     const q = $('#buscar').value.trim().toLowerCase();
     let lista = Core.ordenar(Core.filtrar(S.data.movs, S.F)).reverse();
     if (q) lista = lista.filter(m => (m.concepto + ' ' + m.categoria).toLowerCase().includes(q));
     const ol = $('#lista');
     if (!lista.length) {
-      ol.innerHTML = `<li class="vacio">${q ? 'Ningún movimiento coincide con la búsqueda.' : 'No hay movimientos con estos filtros. Pulsa «Anotar» para añadir uno.'}</li>`;
+      const filtrado = Core.hayFiltroDeContenido(S.F);
+      ol.innerHTML = `<li class="vacio">${q ? 'Ningún movimiento coincide con la búsqueda.' : filtrado ? 'No hay movimientos con estos filtros en este periodo.' : 'No hay movimientos en este periodo. Pulsa «Anotar» para añadir uno.'}</li>`;
       $('#masMovs').hidden = true; return;
     }
     // totales por mes para los separadores
@@ -323,7 +377,7 @@
       const ym = m.fecha.slice(0, 7);
       if (ym !== mesAct) {
         mesAct = ym;
-        html += `<li class="sep"><span>${Core.cap(Core.MESES[+ym.slice(5) - 1])} ${ym.slice(0, 4)}</span><span class="num">${Core.eurC(porMes[ym])}</span></li>`;
+        html += `<li class="sep"><span>${nombreMesLargo(ym)}</span><span class="num">${Core.eurC(porMes[ym])}</span></li>`;
       }
       const ing = m.tipo === 'ingreso';
       html += `<li><button type="button" class="mov" data-id="${esc(m.id)}">
@@ -334,31 +388,109 @@
     $('#masMovs').hidden = lista.length <= S.limite;
   }
 
-  /* ---------------- informes ---------------- */
-  function ctxInforme() { return { cfg: S.data.cfg, cats: S.data.cats, movs: S.data.movs, F: S.F }; }
+  /* ---------------- informes ----------------
+     Dos bloques, cada uno con su periodo: el cierre de un mes y los informes de un año. */
+  const INF_MES = [
+    ['mensual', 'Informe mensual completo', 'Saldos, resumen por categoría y todos los movimientos.'],
+    ['detalle', 'Movimientos del mes', 'La lista completa, con fecha y concepto.']
+  ];
+  const INF_ANIO = [
+    ['secretario', 'Para el Secretario', 'Totales del año por categoría.'],
+    ['anual', 'Anual', 'Total del año por categoría, con porcentajes.'],
+    ['meses', 'Por meses', 'Ingresos, gastos y resultado de cada mes, con tus saldos.'],
+    ['catmeses', 'Categorías por meses', 'Cada categoría mes a mes.'],
+    ['detalle', 'Movimientos del año', 'Todos los movimientos del año.']
+  ];
+  function iniciarInf() {
+    if (S.inf) return;
+    let ym;
+    if (modo(S.F) === 'mes') ym = Core.ymDe(S.F.anio, S.F.mes);
+    else { const ms = mesesConDatos(); ym = ms.length ? ms[ms.length - 1] : hoyYm(); }
+    S.inf = { ym, anio: +ym.slice(0, 4) };
+  }
+  function Finf(ambito) {
+    if (ambito === 'mes') { const [y, m] = S.inf.ym.split('-').map(Number); return { anio: y, mes: m, tipo: 'all', cats: [] }; }
+    return { anio: S.inf.anio, mes: 'all', tipo: 'all', cats: [] };
+  }
+  const docDe = (id, ambito) => Core.construirInforme(id, { cfg: S.data.cfg, cats: S.data.cats, movs: S.data.movs, F: Finf(ambito), saldos: S.saldos });
+  const filaInf = ([id, nombre, desc], ambito) => {
+    const vacio = docDe(id, ambito).vacio;
+    return `<button type="button" class="inf-fila" data-inf="${id}" data-ambito="${ambito}"${vacio ? ' disabled' : ''}><span><b>${nombre}</b><small>${vacio ? 'Sin movimientos en este periodo.' : desc}</small></span><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
+  };
 
   function pintarInformes() {
-    const fs = $('#tiposInforme');
-    if (!fs.querySelector('input')) {
-      fs.insertAdjacentHTML('beforeend', Core.INFORMES.map(i =>
-        `<label class="tipo"><input type="radio" name="inf" value="${i.id}"><span><b>${i.nombre}</b><small>${i.desc}</small></span></label>`).join(''));
-      fs.addEventListener('change', e => { S.informe = e.target.value; pintarInformes(); });
-    }
-    fs.querySelector(`input[value="${S.informe}"]`).checked = true;
-    const doc = Core.construirInforme(S.informe, ctxInforme());
-    const per = Core.periodoDeInforme(S.informe, S.F, S.data.movs);
-    let txt = 'Periodo: ' + Core.etiquetaPeriodo(per.anio, per.mes) + '.';
-    if (S.informe === 'mensual' && (S.F.anio === 'all' || S.F.mes === 'all'))
-      txt += ' Este informe es de un mes concreto: uso el último con datos. Elige otro con los filtros de arriba.';
-    if (['anual', 'meses', 'catmeses'].indexOf(S.informe) >= 0) {
-      if (S.F.anio === 'all') txt += ' Este informe es de un año: uso el más reciente. Elige otro con el filtro de año.';
-      else if (S.F.mes !== 'all') txt += ' Es del año completo; el filtro de mes no se aplica.';
-    }
-    if (S.informe === 'secretario' && Core.hayFiltroDeContenido(S.F)) txt += ' Incluye siempre todas las categorías (no aplica los filtros de tipo ni de categoría).';
-    $('#infPeriodo').textContent = txt;
-    ['#btnPdf', '#btnXlsx', '#btnCompartir'].forEach(s => { $(s).disabled = !!doc.vacio; });
-    $('#previa').innerHTML = doc.vacio ? '<p class="vacio">No hay movimientos en este periodo.</p>' : docHtml(doc);
+    iniciarInf();
+    const hoy = hoyYm();
+    $('#cMes').textContent = nombreMesLargo(S.inf.ym);
+    $('#cSig').disabled = S.inf.ym >= hoy;
+    $('#cAnt').disabled = +S.inf.ym.slice(0, 4) < primerAnio();
+    pintarSaldos();
+    const vacioMes = docDe('secretario', 'mes').vacio;
+    $('#btnSecretario').disabled = vacioMes;
+    $('#cVacio').hidden = !vacioMes;
+    $('#infMes').innerHTML = [['secretario', 'Para el Secretario', 'Ver antes de descargar, o en Excel.']].concat(INF_MES).map(x => filaInf(x, 'mes')).join('');
+    $('#aAnio').textContent = S.inf.anio;
+    $('#aSig').disabled = S.inf.anio >= +hoy.slice(0, 4);
+    $('#aAnt').disabled = S.inf.anio <= primerAnio();
+    $('#infAnio').innerHTML = INF_ANIO.map(x => filaInf(x, 'anio')).join('');
+    $('#btnTodoXlsx').disabled = docDe('anual', 'anio').vacio;
+  }
+  function moverMesInf(d) {
+    let [y, m] = S.inf.ym.split('-').map(Number); m += d;
+    if (m < 1) { m = 12; y--; } if (m > 12) { m = 1; y++; }
+    S.inf.ym = Core.ymDe(y, m); S.inf.anio = y;
+    $('#sError').textContent = '';
+    pintarInformes();
+  }
+
+  function abrirInforme(id, ambito) {
+    S.infSel = { id, ambito };
+    const doc = docDe(id, ambito);
+    $('#tInf').textContent = ({ secretario: 'Para el Secretario', mensual: 'Informe mensual', anual: 'Informe anual', meses: 'Por meses', catmeses: 'Categorías por meses', detalle: 'Movimientos' })[id];
+    $('#previa').innerHTML = docHtml(doc);
     $('#btnCompartir').hidden = !puedeCompartir();
+    abrirHoja('#hojaInf');
+  }
+
+  /* ---------------- saldos anotados a mano ---------------- */
+  const fmtSaldo = c => c === null ? '' : (c / 100).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false });
+  /** texto -> céntimos; '' si está vacío; NaN si no se entiende. Admite negativos. */
+  function leerSaldo(s) {
+    s = String(s).replace(/[\s€]/g, '');
+    if (!s) return '';
+    const neg = /^[-−]/.test(s); if (neg) s = s.slice(1);
+    if (s.indexOf(',') >= 0) s = s.replace(/\./g, '').replace(',', '.');
+    if (!/^\d+(\.\d{1,2})?$/.test(s)) return NaN;
+    return (neg ? -1 : 1) * Math.round(Number(s) * 100);
+  }
+  function ponerSaldo(ym, c) {
+    if (c === '' || c === null) delete S.saldos[ym]; else S.saldos[ym] = c;
+    guardar(LS.saldos, S.saldos);
+  }
+  function pintarSaldos() {
+    const ym = S.inf.ym, ant = Core.ymAnterior(ym);
+    const [y, m] = ym.split('-').map(Number), sig = Core.ymDe(m === 12 ? y + 1 : y, m === 12 ? 1 : m + 1);
+    const ini = Core.saldoIni(S.saldos, ym), fin = Core.saldoFin(S.saldos, ym);
+    if (document.activeElement !== $('#sIni')) $('#sIni').value = fmtSaldo(ini);
+    if (document.activeElement !== $('#sFin')) $('#sFin').value = fmtSaldo(fin);
+    $('#sIniAyuda').textContent = `El de cierre de ${nombreMes(ant)}.`;
+    $('#sFinAyuda').textContent = `Será el de inicio de ${nombreMes(sig)}.`;
+    const sug = Core.saldoSugerido(S.data.movs, S.saldos, ym);
+    const p = $('#sSugerido');
+    if (sug === null) { p.hidden = false; p.innerHTML = '<span>Anota el saldo al empezar y te sugiero el del final.</span>'; }
+    else if (sug === fin) { p.hidden = true; }
+    else {
+      p.hidden = false;
+      p.innerHTML = `Sugerido: <b class="num">${esc(Core.eurC(sug))}</b> <span>(inicio + ingresos − gastos anotados)</span> <button type="button" class="btn peq" id="sUsar">Usar</button>`;
+      p.dataset.valor = sug;
+    }
+  }
+  function cambiarSaldo(input, ym) {
+    const c = leerSaldo(input.value);
+    if (Number.isNaN(c)) { $('#sError').textContent = 'Escribe un importe como 1234,56 (o déjalo vacío).'; return; }
+    $('#sError').textContent = '';
+    ponerSaldo(ym, c);
+    pintarInformes();
   }
 
   function docHtml(doc) {
@@ -405,11 +537,13 @@
   /* ---------------- ajustes ---------------- */
   function pintarAjustes() {
     const { cfg, cats, movs } = S.data;
-    const [y, m, d] = cfg.fecha_saldo_inicial.split('-');
     const fila = (k, v) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`;
-    $('#ajustesDatos').innerHTML = fila('Nombre', cfg.nombre || '—') + fila('Saldo de partida', `${Core.eur(cfg.saldo_inicial)} el ${d}/${m}/${y}`) +
+    const nSaldos = Object.keys(S.saldos).length;
+    $('#ajustesDatos').innerHTML = fila('Nombre', cfg.nombre || '—') +
       fila('Categorías', `${cats.filter(c => c.tipo === 'gasto').length} de gasto · ${cats.filter(c => c.tipo === 'ingreso').length} de ingreso`) +
-      fila('Movimientos', movs.length) + fila('Última actualización', S.sync ? S.sync.toLocaleString('es-ES') : '—');
+      fila('Movimientos', movs.length) +
+      fila('Saldos anotados', nSaldos ? `${nSaldos} ${nSaldos === 1 ? 'mes' : 'meses'} (guardados en este dispositivo)` : 'Ninguno') +
+      fila('Última actualización', S.sync ? S.sync.toLocaleString('es-ES') : '—');
     $('#ajSesion').textContent = S.recordar
       ? 'Este dispositivo recuerda tu sesión: entras directamente al abrir la app.'
       : 'Este dispositivo te pide la contraseña cada vez que abres la app.';
@@ -510,15 +644,6 @@
     finally { b.disabled = false; }
   }
 
-  /* ---------------- hoja de categorías ---------------- */
-  function abrirCats() {
-    const grupos = [['gasto', 'Gastos'], ['ingreso', 'Ingresos']].filter(([t]) => S.F.tipo === 'all' || S.F.tipo === t);
-    $('#listaCats').innerHTML = grupos.map(([t, et]) => `<fieldset><legend>${et}</legend>` +
-      Core.catsDe(S.data.cats, t).map(n => { const k = Core.claveCat(t, n); return `<label class="chk"><input type="checkbox" value="${esc(k)}"${S.F.cats.indexOf(k) >= 0 ? ' checked' : ''}><span>${esc(n)}</span></label>`; }).join('') +
-      '</fieldset>').join('');
-    abrirHoja('#hojaCats');
-  }
-
   /* ---------------- hojas, avisos, navegación ---------------- */
   let foco = null;
   function abrirHoja(sel) { foco = document.activeElement; $(sel).hidden = false; document.body.classList.add('con-hoja'); }
@@ -535,7 +660,6 @@
     S.vista = v;
     $$('.vista').forEach(s => { s.hidden = s.id !== 'v-' + v; });
     $$('.pestanas button').forEach(b => { if (b.dataset.v === v) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
-    $('#saldoHoy').hidden = v !== 'resumen';
     render();
     window.scrollTo(0, 0);
   }
@@ -564,15 +688,75 @@
       S.acceso = S.acceso || await Acceso.cargar();
       mostrarPuerta(S.acceso ? 'entrada' : 'preparar');
     });
+    $('#btnRecargar').addEventListener('click', async () => { if (await sincronizar(false)) aviso('Datos actualizados'); });
 
-    $('#btnRecargar').addEventListener('click', () => sincronizar(false));
-    $('#fAnio').addEventListener('change', e => setFiltro({ anio: e.target.value === 'all' ? 'all' : +e.target.value }));
-    $('#fMes').addEventListener('change', e => setFiltro({ mes: e.target.value === 'all' ? 'all' : +e.target.value }));
-    $('#fTipo').addEventListener('change', e => setFiltro({ tipo: e.target.value }));
-    $('#fCats').addEventListener('click', abrirCats);
-    $('#fLimpiar').addEventListener('click', () => setFiltro({ mes: 'all', tipo: 'all', cats: [] }));
-    $('#listaCats').addEventListener('change', () => setFiltro({ cats: $$('#listaCats input:checked').map(i => i.value) }));
-    $('#catsNinguna').addEventListener('click', () => { $$('#listaCats input').forEach(i => { i.checked = false; }); setFiltro({ cats: [] }); });
+    // periodo
+    $('#pAnt').addEventListener('click', () => moverPeriodo(-1));
+    $('#pSig').addEventListener('click', () => moverPeriodo(1));
+    $('#pTexto').addEventListener('click', abrirPeriodo);
+    $('#hpAnt').addEventListener('click', () => { S.pAnio--; pintarHojaPeriodo(); });
+    $('#hpSig').addEventListener('click', () => { S.pAnio++; pintarHojaPeriodo(); });
+    $('#hpMeses').addEventListener('click', e => { const b = e.target.closest('[data-mes]'); if (!b) return; setFiltro({ anio: S.pAnio, mes: +b.dataset.mes }); cerrarHojas(); });
+    $('#hpTodoAnio').addEventListener('click', () => { setFiltro({ anio: S.pAnio, mes: 'all' }); cerrarHojas(); });
+    $('#hpTodo').addEventListener('click', () => { setFiltro({ anio: 'all', mes: 'all' }); cerrarHojas(); });
+
+    // filtros de Movimientos
+    $('#btnFiltrar').addEventListener('click', abrirFiltro);
+    $$('#hojaFiltro input[name="ftipo"]').forEach(r => r.addEventListener('change', () => { setFiltro({ tipo: r.value }); pintarHojaFiltro(); }));
+    $('#listaCats').addEventListener('change', () => { setFiltro({ cats: $$('#listaCats input:checked').map(i => i.value) }); pintarHojaFiltro(); });
+    $('#fQuitar').addEventListener('click', () => { setFiltro({ tipo: 'all', cats: [] }); pintarHojaFiltro(); });
+    $('#chips').addEventListener('click', e => {
+      const b = e.target.closest('[data-quitar]'); if (!b) return;
+      const q = b.dataset.quitar;
+      if (q === 'todo') setFiltro({ tipo: 'all', cats: [] });
+      else if (q === 'tipo') setFiltro({ tipo: 'all' });
+      else setFiltro({ cats: S.F.cats.filter(k => k !== q) });
+    });
+
+    // tocar una categoría del resumen
+    ['#gCatGas', '#gCatIng'].forEach(id => {
+      $(id).addEventListener('click', e => { const li = e.target.closest('li[data-cat]'); if (li) verCategoria(li.dataset.cat); });
+      $(id).addEventListener('keydown', e => { const li = e.target.closest('li[data-cat]'); if (li && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); verCategoria(li.dataset.cat); } });
+    });
+
+    // informes
+    $('#cAnt').addEventListener('click', () => moverMesInf(-1));
+    $('#cSig').addEventListener('click', () => moverMesInf(1));
+    $('#aAnt').addEventListener('click', () => { S.inf.anio--; pintarInformes(); });
+    $('#aSig').addEventListener('click', () => { S.inf.anio++; pintarInformes(); });
+    $('#sIni').addEventListener('change', e => cambiarSaldo(e.target, Core.ymAnterior(S.inf.ym)));
+    $('#sFin').addEventListener('change', e => cambiarSaldo(e.target, S.inf.ym));
+    $('#sSugerido').addEventListener('click', e => {
+      if (!e.target.closest('#sUsar')) return;
+      ponerSaldo(S.inf.ym, +$('#sSugerido').dataset.valor);
+      $('#sFin').value = fmtSaldo(Core.saldoFin(S.saldos, S.inf.ym));
+      pintarInformes();
+    });
+    ['#infMes', '#infAnio'].forEach(id => $(id).addEventListener('click', e => {
+      const b = e.target.closest('.inf-fila'); if (b) abrirInforme(b.dataset.inf, b.dataset.ambito);
+    }));
+    $('#btnSecretario').addEventListener('click', e => conBoton(e.currentTarget, async () => {
+      const doc = docDe('secretario', 'mes');
+      descargar(await pdfDe(doc), doc.archivo + '.pdf', MIME_PDF);
+    }));
+    $('#btnPdf').addEventListener('click', e => conBoton(e.currentTarget, async () => {
+      const doc = docDe(S.infSel.id, S.infSel.ambito);
+      descargar(await pdfDe(doc), doc.archivo + '.pdf', MIME_PDF);
+    }));
+    $('#btnXlsx').addEventListener('click', e => conBoton(e.currentTarget, async () => {
+      const doc = docDe(S.infSel.id, S.infSel.ambito);
+      descargar(XLSXW.crearXlsx([doc], Core.textoCelda), doc.archivo + '.xlsx', MIME_XLSX);
+    }));
+    $('#btnCompartir').addEventListener('click', e => conBoton(e.currentTarget, async () => {
+      const doc = docDe(S.infSel.id, S.infSel.ambito);
+      const file = new File([await pdfDe(doc)], doc.archivo + '.pdf', { type: MIME_PDF });
+      await navigator.share({ files: [file], title: doc.titulo });
+    }));
+    $('#btnTodoXlsx').addEventListener('click', e => conBoton(e.currentTarget, async () => {
+      const docs = INF_ANIO.map(([id]) => docDe(id, 'anio')).filter(d => !d.vacio);
+      if (!docs.length) throw new Error('No hay movimientos en este año.');
+      descargar(XLSXW.crearXlsx(docs, Core.textoCelda), `Informes_${S.inf.anio}.xlsx`, MIME_XLSX);
+    }));
 
     $$('.pestanas button').forEach(b => b.addEventListener('click', () => irA(b.dataset.v)));
     $('#fab').addEventListener('click', () => abrirMov(null));
@@ -590,25 +774,6 @@
     $$('[data-cerrar]').forEach(b => b.addEventListener('click', cerrarHojas));
     $$('.hoja-fondo').forEach(h => h.addEventListener('click', e => { if (e.target === h) cerrarHojas(); }));
     document.addEventListener('keydown', e => { if (e.key === 'Escape') cerrarHojas(); });
-
-    $('#btnPdf').addEventListener('click', e => conBoton(e.currentTarget, async () => {
-      const doc = Core.construirInforme(S.informe, ctxInforme());
-      descargar(await pdfDe(doc), doc.archivo + '.pdf', MIME_PDF);
-    }));
-    $('#btnXlsx').addEventListener('click', e => conBoton(e.currentTarget, async () => {
-      const doc = Core.construirInforme(S.informe, ctxInforme());
-      descargar(XLSXW.crearXlsx([doc], Core.textoCelda), doc.archivo + '.xlsx', MIME_XLSX);
-    }));
-    $('#btnTodoXlsx').addEventListener('click', e => conBoton(e.currentTarget, async () => {
-      const docs = Core.INFORMES.map(i => Core.construirInforme(i.id, ctxInforme())).filter(d => !d.vacio);
-      if (!docs.length) throw new Error('No hay movimientos en este periodo.');
-      descargar(XLSXW.crearXlsx(docs, Core.textoCelda), `Informes_${Core.slugPeriodo(S.F.anio, S.F.mes)}.xlsx`, MIME_XLSX);
-    }));
-    $('#btnCompartir').addEventListener('click', e => conBoton(e.currentTarget, async () => {
-      const doc = Core.construirInforme(S.informe, ctxInforme());
-      const file = new File([await pdfDe(doc)], doc.archivo + '.pdf', { type: MIME_PDF });
-      await navigator.share({ files: [file], title: doc.titulo });
-    }));
 
     let tRes;
     window.addEventListener('resize', () => { clearTimeout(tRes); tRes = setTimeout(() => { if (S.vista === 'resumen' && S.data) pintarResumen(); }, 150); });
