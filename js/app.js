@@ -6,7 +6,7 @@
   const $$ = s => [...document.querySelectorAll(s)];
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-  const LS = { cx: 'mc.conexion', datos: 'mc.datos', filtros: 'mc.filtros', ultCat: 'mc.ultimaCategoria', saldos: 'mc.saldos' };
+  const LS = { cx: 'mc.conexion', datos: 'mc.datos', filtros: 'mc.filtros', ultCat: 'mc.ultimaCategoria', saldos: 'mc.saldos', saldosPend: 'mc.saldosPendientes', saldosMig: 'mc.saldosSubidos' };
   const leer = k => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
   const guardar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* almacenamiento lleno o bloqueado */ } };
   const borrarLS = k => { try { localStorage.removeItem(k); } catch (e) { } };
@@ -24,6 +24,7 @@
     accesoNuevo: null,      // acceso.json recién creado, pendiente de subir
     data: null,             // {cfg, cats, movs}
     saldos: {},             // { 'YYYY-MM': céntimos al terminar el mes } — los anota el usuario
+    saldosHoja: false,      // ¿la hoja de Google guarda los saldos (pestaña Saldos)?
     sync: null,             // fecha de la última sincronización
     F: Object.assign({}, Core.FILTRO_VACIO),
     vista: 'resumen', limite: 150, editando: null,
@@ -59,6 +60,7 @@
       guardarDatos();
       ajustarFiltros(); render();
       estado('Actualizado a las ' + hora(S.sync));
+      sincronizarSaldos();
       return true;
     } catch (e) {
       if (e.code === 'AUTH') { claveCaducada(); return false; }
@@ -67,6 +69,36 @@
       return false;
     }
   }
+  /* Saldos en la hoja (pestaña Saldos). Si el Apps Script aún no lo admite, se quedan en el móvil
+     y se suben solos en cuanto pueda. Pendientes: { 'YYYY-MM': céntimos | null (borrar) }. */
+  let subiendoSaldos = false;
+  async function sincronizarSaldos() {
+    if (subiendoSaldos || !S.cx) return;
+    subiendoSaldos = true;
+    try {
+      const pend = leer(LS.saldosPend) || {};
+      if (!leer(LS.saldosMig)) Object.keys(S.saldos).forEach(k => { if (!(k in pend)) pend[k] = S.saldos[k]; });
+      let j = await api('getSaldos');             // falla con «Acción desconocida» si el script es antiguo
+      const habia = Object.keys(pend).length;
+      for (const k of Object.keys(pend)) {
+        await api('setSaldo', { mes: k, saldo: pend[k] === null ? null : pend[k] / 100 });
+        delete pend[k]; guardar(LS.saldosPend, pend);
+      }
+      guardar(LS.saldosMig, true);
+      if (habia) j = await api('getSaldos');
+      S.saldosHoja = true;
+      S.saldos = Object.assign({}, j.saldos || {});
+      const nuevos = leer(LS.saldosPend) || {};  // anotados mientras se sincronizaba
+      Object.keys(nuevos).forEach(k => { if (nuevos[k] === null) delete S.saldos[k]; else S.saldos[k] = nuevos[k]; });
+      guardar(LS.saldos, S.saldos);
+      if (S.data) render();
+    } catch (e) { S.saldosHoja = false; /* sin conexión o script antiguo: siguen en el móvil */ }
+    finally {
+      subiendoSaldos = false;
+      if (S.saldosHoja && Object.keys(leer(LS.saldosPend) || {}).length) setTimeout(sincronizarSaldos, 500); // anotados mientras tanto
+    }
+  }
+
   const hora = d => d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
   const estado = t => { $('#estado').textContent = t; };
 
@@ -114,7 +146,7 @@
   }
 
   function cerrarSesion() {
-    // los saldos anotados se conservan: solo viven en este dispositivo
+    // los saldos se conservan en el móvil (y en la hoja, si el script ya los guarda)
     [LS.cx, LS.datos, LS.ultCat].forEach(borrarLS); SS.borrar(LS.cx);
     S.cx = null; S.data = null; S.sync = null;
     cerrarHojas();
@@ -466,6 +498,10 @@
   function ponerSaldo(ym, c) {
     if (c === '' || c === null) delete S.saldos[ym]; else S.saldos[ym] = c;
     guardar(LS.saldos, S.saldos);
+    const pend = leer(LS.saldosPend) || {};
+    pend[ym] = (c === '' || c === null) ? null : c;
+    guardar(LS.saldosPend, pend);
+    sincronizarSaldos();
   }
   function pintarSaldos() {
     const ym = S.inf.ym, ant = Core.ymAnterior(ym);
@@ -542,7 +578,7 @@
     $('#ajustesDatos').innerHTML = fila('Nombre', cfg.nombre || '—') +
       fila('Categorías', `${cats.filter(c => c.tipo === 'gasto').length} de gasto · ${cats.filter(c => c.tipo === 'ingreso').length} de ingreso`) +
       fila('Movimientos', movs.length) +
-      fila('Saldos anotados', nSaldos ? `${nSaldos} ${nSaldos === 1 ? 'mes' : 'meses'} (guardados en este dispositivo)` : 'Ninguno') +
+      fila('Saldos anotados', nSaldos ? `${nSaldos} ${nSaldos === 1 ? 'mes' : 'meses'} ${S.saldosHoja ? '(guardados en tu hoja, pestaña Saldos)' : '(guardados en este dispositivo)'}` : 'Ninguno') +
       fila('Última actualización', S.sync ? S.sync.toLocaleString('es-ES') : '—');
     $('#ajSesion').textContent = S.recordar
       ? 'Este dispositivo recuerda tu sesión: entras directamente al abrir la app.'
