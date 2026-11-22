@@ -1,6 +1,6 @@
 /* Mis Cuentas — service worker: la app abre al instante y funciona sin cobertura
    (con los últimos datos descargados). Las llamadas a Google nunca se guardan aquí. */
-const VERSION = 'mis-cuentas-v5';
+const VERSION = 'mis-cuentas-v6';
 const ARCHIVOS = ['./', 'index.html', 'css/app.css', 'js/core.js', 'js/charts.js', 'js/xlsx.js', 'js/pdf.js', 'js/acceso.js', 'js/app.js',
   'vendor/pdf-lib.min.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 // acceso.json no va en la lista: puede no existir todavía. Se guarda solo cuando se descarga.

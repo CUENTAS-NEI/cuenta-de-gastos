@@ -322,7 +322,33 @@
     };
   }
 
-  const CONSTRUCTORES = { secretario: docSecretario, mensual: docMensual, anual: docAnual, meses: docMeses, catmeses: docCatMeses, detalle: docDetalle };
+  /* Gastos ordinarios: los gastos de la categoría «Ordinarios» (o la que se llame parecido), uno a uno.
+     Pensado para compartir con el director: no lleva saldos ni ingresos. */
+  const sinAcentos = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  function catsOrdinarias(cats) {
+    return catsDe(cats, 'gasto').filter(n => { const t = sinAcentos(n); return t.indexOf('ordinari') >= 0 && t.indexOf('extra') < 0; });
+  }
+  function docOrdinarios(ctx) {
+    const { cfg, cats, movs, F } = ctx;
+    const nombres = catsOrdinarias(cats);
+    const lista = ordenar(filtrar(movs, { anio: F.anio, mes: F.mes, tipo: 'gasto', cats: [] })).filter(m => nombres.indexOf(m.categoria) >= 0);
+    const total = lista.reduce((a, m) => a + cents(m.importe), 0);
+    return {
+      id: 'ordinarios', titulo: 'GASTOS ORDINARIOS',
+      meta: [['Nombre', cfg.nombre || ''], ['Periodo', etiquetaPeriodo(F.anio, F.mes)]],
+      secciones: [{
+        titulo: 'GASTOS ORDINARIOS', tono: 'gasto',
+        cols: [{ h: 'Fecha', w: 1.1 }, { h: 'Concepto', w: 4 }, { h: 'Importe', w: 1.3, num: true }],
+        filas: lista.map(m => ({ c: [fmtFecha(m), m.concepto || m.categoria, E(cents(m.importe))] }))
+          .concat([{ c: ['TOTAL:', '', E(total)], k: 'total' }])
+      }],
+      notas: nombres.length ? [] : ['No hay ninguna categoría de gasto llamada «Ordinarios» en la pestaña Categorías.'],
+      orient: 'p', hoja: 'Gastos ordinarios', archivo: `Gastos_ordinarios_${slugPeriodo(F.anio, F.mes)}`,
+      vacio: !lista.length, sinCategoria: !nombres.length
+    };
+  }
+
+  const CONSTRUCTORES = { secretario: docSecretario, ordinarios: docOrdinarios, mensual: docMensual, anual: docAnual, meses: docMeses, catmeses: docCatMeses, detalle: docDetalle };
   const construirInforme = (id, ctx) => CONSTRUCTORES[id](ctx);
 
   /** texto de una celda tal y como se ve en PDF y en pantalla */
@@ -339,6 +365,6 @@
     FILTRO_VACIO, claveCat, pasa, filtrar, hayFiltroDeContenido, ordenar,
     ymDe, ymAnterior, saldoIni, saldoFin, saldoSugerido,
     totales, kpis, catsDe, porCategoria, mesesRango, etiquetaMes,
-    serieMensual, aniosConDatos, periodoEfectivo, periodoDeInforme, INFORMES, construirInforme, textoCelda
+    serieMensual, aniosConDatos, periodoEfectivo, periodoDeInforme, INFORMES, construirInforme, catsOrdinarias, textoCelda
   };
 })(typeof window !== 'undefined' ? window : globalThis);

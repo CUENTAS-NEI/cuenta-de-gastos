@@ -423,6 +423,8 @@
   /* ---------------- informes ----------------
      Dos bloques, cada uno con su periodo: el cierre de un mes y los informes de un año. */
   const INF_MES = [
+    ['secretario', 'Para el Secretario', 'Totales del mes por categoría. En PDF o Excel.'],
+    ['ordinarios', 'Gastos ordinarios', 'Solo los gastos ordinarios del mes, uno a uno. Para compartir con el director.'],
     ['mensual', 'Informe mensual completo', 'Saldos, resumen por categoría y todos los movimientos.'],
     ['detalle', 'Movimientos del mes', 'La lista completa, con fecha y concepto.']
   ];
@@ -446,8 +448,9 @@
   }
   const docDe = (id, ambito) => Core.construirInforme(id, { cfg: S.data.cfg, cats: S.data.cats, movs: S.data.movs, F: Finf(ambito), saldos: S.saldos });
   const filaInf = ([id, nombre, desc], ambito) => {
-    const vacio = docDe(id, ambito).vacio;
-    return `<button type="button" class="inf-fila" data-inf="${id}" data-ambito="${ambito}"${vacio ? ' disabled' : ''}><span><b>${nombre}</b><small>${vacio ? 'Sin movimientos en este periodo.' : desc}</small></span><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
+    const doc = docDe(id, ambito), vacio = doc.vacio;
+    const motivo = doc.sinCategoria ? 'Falta la categoría «Ordinarios» en tu hoja.' : id === 'ordinarios' ? 'Sin gastos ordinarios en este periodo.' : 'Sin movimientos en este periodo.';
+    return `<button type="button" class="inf-fila" data-inf="${id}" data-ambito="${ambito}"${vacio ? ' disabled' : ''}><span><b>${nombre}</b><small>${vacio ? motivo : desc}</small></span><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
   };
 
   function pintarInformes() {
@@ -458,9 +461,8 @@
     $('#cAnt').disabled = +S.inf.ym.slice(0, 4) < primerAnio();
     pintarSaldos();
     const vacioMes = docDe('secretario', 'mes').vacio;
-    $('#btnSecretario').disabled = vacioMes;
     $('#cVacio').hidden = !vacioMes;
-    $('#infMes').innerHTML = [['secretario', 'Para el Secretario', 'Ver antes de descargar, o en Excel.']].concat(INF_MES).map(x => filaInf(x, 'mes')).join('');
+    $('#infMes').innerHTML = INF_MES.map(x => filaInf(x, 'mes')).join('');
     $('#aAnio').textContent = S.inf.anio;
     $('#aSig').disabled = S.inf.anio >= +hoy.slice(0, 4);
     $('#aAnt').disabled = S.inf.anio <= primerAnio();
@@ -478,7 +480,7 @@
   function abrirInforme(id, ambito) {
     S.infSel = { id, ambito };
     const doc = docDe(id, ambito);
-    $('#tInf').textContent = ({ secretario: 'Para el Secretario', mensual: 'Informe mensual', anual: 'Informe anual', meses: 'Por meses', catmeses: 'Categorías por meses', detalle: 'Movimientos' })[id];
+    $('#tInf').textContent = ({ secretario: 'Para el Secretario', ordinarios: 'Gastos ordinarios', mensual: 'Informe mensual', anual: 'Informe anual', meses: 'Por meses', catmeses: 'Categorías por meses', detalle: 'Movimientos' })[id];
     $('#previa').innerHTML = docHtml(doc);
     $('#btnCompartir').hidden = !puedeCompartir();
     abrirHoja('#hojaInf');
@@ -770,10 +772,6 @@
     });
     ['#infMes', '#infAnio'].forEach(id => $(id).addEventListener('click', e => {
       const b = e.target.closest('.inf-fila'); if (b) abrirInforme(b.dataset.inf, b.dataset.ambito);
-    }));
-    $('#btnSecretario').addEventListener('click', e => conBoton(e.currentTarget, async () => {
-      const doc = docDe('secretario', 'mes');
-      descargar(await pdfDe(doc), doc.archivo + '.pdf', MIME_PDF);
     }));
     $('#btnPdf').addEventListener('click', e => conBoton(e.currentTarget, async () => {
       const doc = docDe(S.infSel.id, S.infSel.ambito);
